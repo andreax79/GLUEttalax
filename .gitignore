@@ -108,3 +108,5 @@ venv.bak/
 /lib
 /include
 pip-selfcheck.json
+/local
+/share

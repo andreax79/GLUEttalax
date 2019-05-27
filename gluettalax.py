@@ -80,7 +80,8 @@ class Job(object):
         return self.glue.get_job_run(JobName=self.name, RunId=job_run_id)['JobRun']['JobRunState']
 
     def run(self, **kargs):
-        result = self.glue.start_job_run(JobName=self.name, Timeout=int(self.timeout/60), Arguments=kargs)
+        arguments = dict([('--%s' % k, v) for k, v in kargs.items()])
+        result = self.glue.start_job_run(JobName=self.name, Timeout=int(self.timeout/60), Arguments=arguments)
         job_run_id = result['JobRunId']
         start_time = time.time()
         run_state = self.get_run_state(job_run_id)
