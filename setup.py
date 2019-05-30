@@ -4,14 +4,14 @@ import os
 import os.path
 import codecs
 from setuptools import setup
-from freakotp import __version__
+from gluettalax import __version__
 
 d = os.path.abspath(os.path.dirname(__file__))
 with codecs.open(os.path.join(d, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(
-    name = 'freakotp',
+    name = 'gluettalax',
     version = __version__,
     description = 'Glue ETL without constipation',
     long_description = long_description,
@@ -39,7 +39,7 @@ setup(
     include_package_data=True,
     keywords = 'aws glue cli',
     py_modules=[ 'gluettalax' ],
-    install_requires = [],
+    install_requires = [ 'boto3' ],
     entry_points = {
         'console_scripts': [
             'gluettalax=gluettalax:main',
