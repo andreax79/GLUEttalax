@@ -28,7 +28,7 @@ import boto3
 import time
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '0.1.0'
+__version__ = '0.2.0'
 __all__ = [
     'Crawler',
     'CrawlerTimeout',
@@ -63,10 +63,11 @@ class JobConcurrentRunsExceededException(Exception):
 
 class Crawler(object):
 
-    def __init__(self, name, delay=DEFAULT_CRAWLER_DELAY, timeout=DEFAULT_CRAWLER_TIMEOUT):
+    def __init__(self, name, delay=DEFAULT_CRAWLER_DELAY, timeout=DEFAULT_CRAWLER_TIMEOUT, op_async=False):
         self.name = name
         self.delay = delay
         self.timeout = timeout
+        self.op_async = op_async
         self.glue = boto3.client('glue')
 
     @property
@@ -89,6 +90,8 @@ class Crawler(object):
                 time.sleep(self.delay)
         if self.is_ready:
             self.glue.start_crawler(Name=self.name)
+        if self.op_async:
+            return
         start_time = time.time()
         while not self.is_ready:
             if time.time() > start_time + self.timeout:
@@ -103,10 +106,11 @@ class JobTimeout(Exception):
 
 class Job(object):
 
-    def __init__(self, name, delay=DEFAULT_JOB_DELAY, timeout=None):
+    def __init__(self, name, delay=DEFAULT_JOB_DELAY, timeout=None, op_async=False):
         self.name = name
         self.delay = delay
         self.timeout = timeout
+        self.op_async = op_async
         self.glue = boto3.client('glue')
         try:
             job = self.glue.get_job(JobName=self.name)['Job']
@@ -138,6 +142,8 @@ class Job(object):
         job_run_id = result['JobRunId']
         start_time = time.time()
         run_state = self.get_run_state(job_run_id)
+        if self.op_async:
+            return True
         while run_state not in [ 'SUCCEEDED', 'FAILED' ]:
             if time.time() > start_time + self.timeout:
                 raise JobTimeout()
@@ -145,14 +151,14 @@ class Job(object):
             run_state = self.get_run_state(job_run_id)
         return run_state == 'SUCCEEDED'
 
-def run_crawler(name, rerun=False, delay=DEFAULT_CRAWLER_DELAY, timeout=DEFAULT_CRAWLER_TIMEOUT):
-    return Crawler(name=name, delay=delay, timeout=timeout).run(delay)
+def run_crawler(name, rerun=False, delay=DEFAULT_CRAWLER_DELAY, timeout=DEFAULT_CRAWLER_TIMEOUT, op_async=False):
+    return Crawler(name=name, delay=delay, timeout=timeout, op_async=op_async).run()
 
 def list_crawlers():
     return [x['Name'] for x in boto3.client('glue').get_crawlers()['Crawlers']]
 
-def run_job(name, delay=DEFAULT_JOB_DELAY, timeout=None, **kargs):
-    return Job(name=name, delay=delay, timeout=timeout).run(**kargs)
+def run_job(name, delay=DEFAULT_JOB_DELAY, timeout=None, op_async=False, **kargs):
+    return Job(name=name, delay=delay, timeout=timeout, op_async=op_async).run(**kargs)
 
 def list_jobs():
     return [x['Name'] for x in boto3.client('glue').get_jobs()['Jobs']]
@@ -163,8 +169,8 @@ def main():
         print('usage: gluettalax <command> [parameters]')
         print(' gluettalax list_crawlers')
         print(' gluettalax list_jobs')
-        print(' gluettalax run_creawler <name>')
-        print(' gluettalax run_job <name> [--param=value ...]')
+        print(' gluettalax run_crawler <name> [-async]')
+        print(' gluettalax run_job <name> [-async] [--param=value ...]')
         sys.exit(2)
     cmd = argv[1]
     try:
@@ -174,14 +180,22 @@ def main():
             if len(argv) < 3:
                 raise ValueError('missing crawler name')
             name = argv[2]
-            run_crawler(name)
+            kargs = { 'op_async': False }
+            args = argv[3:]
+            while args:
+                arg = args.pop(0)
+                if arg == '-async' or arg == '--async':
+                    kargs['op_async'] = True
+                else:
+                    raise ValueError('invalid option')
+            run_crawler(name, **kargs)
         if cmd == 'list_jobs':
             print('\n'.join(list_jobs()))
         if cmd == 'run_job':
             if len(argv) < 3:
                 raise ValueError('missing job name')
             name = argv[2]
-            kargs = {}
+            kargs = { 'op_async': False }
             args = argv[3:]
             opt = None
             while args:
@@ -197,9 +211,12 @@ def main():
                     opt = opt[2:]
                     args.insert(0, next_arg)
                 else:
-                    if not arg.startswith('--'):
+                    if arg == '-async' or arg == '--async':
+                        kargs['op_async'] = True
+                    elif arg.startswith('--'):
+                        opt = arg[2:]
+                    else:
                         raise ValueError('invalid option')
-                    opt = arg[2:]
             if opt is not None:
                 raise ValueError('missing value for {0}'.format(opt))
             if run_job(name, **kargs):
