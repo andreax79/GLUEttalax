@@ -37,7 +37,8 @@ __all__ = [
     'run_crawler',
     'list_crawlers',
     'run_job',
-    'list_jobs'
+    'list_jobs',
+    'list_runs'
 ]
 
 def seconds(x): return x
@@ -46,6 +47,50 @@ def minutes(x): return x * 60
 DEFAULT_CRAWLER_DELAY   = seconds(10)
 DEFAULT_CRAWLER_TIMEOUT = minutes(10)
 DEFAULT_JOB_DELAY       = seconds(10)
+
+SUCCEEDED = 'SUCCEEDED'
+FAILED = 'FAILED'
+
+seconds_per_minute = 60
+seconds_per_hour = 3600
+seconds_per_day = 86400
+
+TIME_INTERVALS = [1,
+                  seconds_per_minute,
+                  seconds_per_hour,
+                  seconds_per_day]
+
+SHORT_TIME_LABELS = [ 's', 'm', 'h', 'd' ]
+
+def format_time(seconds=0):
+    """
+       Format a temporal interval in a human readable format
+
+        :param seconds:      number of seconds
+        :type seconds:       integer
+        :return:             the formatted temporal interval
+        :rtype:              str
+    """
+    negative = seconds < 0
+    seconds = abs(seconds)
+    empty = True
+    cut = -1
+    result = []
+    for i in range(len(SHORT_TIME_LABELS)-1, -1, -1):
+        if i == cut:
+            break
+        interval = TIME_INTERVALS[i];
+        a = seconds // interval
+        if a > 0 or (i == 0 and empty):
+            if negative:
+                part = "-%d" % int(a)
+            else:
+                part = str(int(a))
+            part = part + SHORT_TIME_LABELS[i]
+            result.append(part)
+            seconds -= a * interval
+            empty = False
+    return " ".join(result)
 
 
 class CrawlerTimeout(Exception):
@@ -144,12 +189,12 @@ class Job(object):
         run_state = self.get_run_state(job_run_id)
         if self.op_async:
             return True
-        while run_state not in [ 'SUCCEEDED', 'FAILED' ]:
+        while run_state not in [ SUCCEEDED, FAILED ]:
             if time.time() > start_time + self.timeout:
                 raise JobTimeout()
             time.sleep(self.delay)
             run_state = self.get_run_state(job_run_id)
-        return run_state == 'SUCCEEDED'
+        return run_state == SUCCEEDED
 
 def run_crawler(name, rerun=False, delay=DEFAULT_CRAWLER_DELAY, timeout=DEFAULT_CRAWLER_TIMEOUT, op_async=False):
     return Crawler(name=name, delay=delay, timeout=timeout, op_async=op_async).run()
@@ -163,12 +208,34 @@ def run_job(name, delay=DEFAULT_JOB_DELAY, timeout=None, op_async=False, **kargs
 def list_jobs():
     return [x['Name'] for x in boto3.client('glue').get_jobs()['Jobs']]
 
+def list_runs(name=None, include_succeeded=True):
+    if name is None:
+        for job in boto3.client('glue').get_jobs()['Jobs']:
+            list_runs(name=job['Name'], include_succeeded=False)
+        return
+    result = boto3.client('glue').get_job_runs(JobName=name)
+    print('%-10s %-4s %10s  %-19s   %s' % (
+        'Status', 'Cap', 'Exec time',  'Start time', 'Name and arguments'))
+    print('-' * 70)
+    for run in result['JobRuns']:
+        if not include_succeeded and run['JobRunState'] == SUCCEEDED:
+            continue
+        print('%-10s %-4d %10s  %-19s   %s %s' % (
+            run['JobRunState'],
+            run['MaxCapacity'],
+            format_time(run['ExecutionTime']),
+            run['StartedOn'].isoformat(' ').split('.')[0],
+            name,
+            ' '.join(['%s %s' % (k, v) for k, v in run['Arguments'].items()])
+        ))
+
 def main():
     argv = sys.argv
     if len(argv) < 2:
         print('usage: gluettalax <command> [parameters]')
         print(' gluettalax list_crawlers')
         print(' gluettalax list_jobs')
+        print(' gluettalax list_runs [name]')
         print(' gluettalax run_crawler <name> [-async]')
         print(' gluettalax run_job <name> [-async] [--param=value ...]')
         sys.exit(2)
@@ -191,6 +258,12 @@ def main():
             run_crawler(name, **kargs)
         if cmd == 'list_jobs':
             print('\n'.join(list_jobs()))
+        if cmd == 'list_runs':
+            if len(argv) > 2:
+                name = argv[2]
+            else:
+                name = None
+            list_runs(name)
         if cmd == 'run_job':
             if len(argv) < 3:
                 raise ValueError('missing job name')
