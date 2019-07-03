@@ -222,7 +222,7 @@ def list_runs(name=None, include_succeeded=True):
             continue
         print('%-10s %-4d %10s  %-19s   %s %s' % (
             run['JobRunState'],
-            run['MaxCapacity'],
+            run['AllocatedCapacity'],
             format_time(run['ExecutionTime']),
             run['StartedOn'].isoformat(' ').split('.')[0],
             name,
