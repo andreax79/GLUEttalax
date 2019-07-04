@@ -214,20 +214,23 @@ def list_runs(name=None, include_succeeded=True):
             list_runs(name=job['Name'], include_succeeded=False)
         return
     result = boto3.client('glue').get_job_runs(JobName=name)
-    print('%-10s %-4s %10s  %-19s   %s' % (
-        'Status', 'Cap', 'Exec time',  'Start time', 'Name and arguments'))
-    print('-' * 70)
-    for run in result['JobRuns']:
-        if not include_succeeded and run['JobRunState'] == SUCCEEDED:
-            continue
-        print('%-10s %-4d %10s  %-19s   %s %s' % (
-            run['JobRunState'],
-            run['AllocatedCapacity'],
-            format_time(run['ExecutionTime']),
-            run['StartedOn'].isoformat(' ').split('.')[0],
-            name,
-            ' '.join(['%s %s' % (k, v) for k, v in run['Arguments'].items()])
-        ))
+    try:
+        print('%-10s %-4s %10s  %-19s   %s' % (
+            'Status', 'Cap', 'Exec time',  'Start time', 'Name and arguments'))
+        print('-' * 70)
+        for run in result['JobRuns']:
+            if not include_succeeded and run['JobRunState'] == SUCCEEDED:
+                continue
+            print('%-10s %-4d %10s  %-19s   %s %s' % (
+                run['JobRunState'],
+                run['AllocatedCapacity'],
+                format_time(run['ExecutionTime']),
+                run['StartedOn'].isoformat(' ').split('.')[0],
+                name,
+                ' '.join(['%s %s' % (k, v) for k, v in run['Arguments'].items()])
+            ))
+    except IOError: # e.g. Broken pipe
+        pass
 
 def main():
     argv = sys.argv
