@@ -26,14 +26,22 @@
 import sys
 import boto3
 import time
+import fnmatch
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '0.3.0'
+__version__ = '0.4.0'
 __all__ = [
-    'Crawler',
     'CrawlerTimeout',
-    'Job',
+    'GluettalaxException',
+    'CrawlerTimeout',
+    'CrawlerNotFound',
+    'JobNotFound',
     'JobTimeout',
+    'JobConcurrentRunsExceededException',
+    'InvalidOption',
+    'GluettalaxCommandNotFound',
+    'Crawler',
+    'Job',
     'run_crawler',
     'list_crawlers',
     'run_job',
@@ -43,6 +51,7 @@ __all__ = [
 
 def seconds(x): return x
 def minutes(x): return x * 60
+def hours(x):   return minutes(x) * 60
 
 DEFAULT_CRAWLER_DELAY   = seconds(10)
 DEFAULT_CRAWLER_TIMEOUT = minutes(10)
@@ -51,16 +60,12 @@ DEFAULT_JOB_DELAY       = seconds(10)
 SUCCEEDED = 'SUCCEEDED'
 FAILED = 'FAILED'
 
-seconds_per_minute = 60
-seconds_per_hour = 3600
-seconds_per_day = 86400
-
-TIME_INTERVALS = [1,
-                  seconds_per_minute,
-                  seconds_per_hour,
-                  seconds_per_day]
-
-SHORT_TIME_LABELS = [ 's', 'm', 'h', 'd' ]
+TIME_LABELS = (
+    ('s',   1),
+    ('m',   minutes(1)),
+    ('h',   hours(1)),
+    ('d',   hours(24))
+)
 
 def format_time(seconds=0):
     """
@@ -76,35 +81,48 @@ def format_time(seconds=0):
     empty = True
     cut = -1
     result = []
-    for i in range(len(SHORT_TIME_LABELS)-1, -1, -1):
+    for i in range(len(TIME_LABELS)-1, -1, -1):
         if i == cut:
             break
-        interval = TIME_INTERVALS[i];
+        interval = TIME_LABELS[i][1];
         a = seconds // interval
         if a > 0 or (i == 0 and empty):
             if negative:
                 part = "-%d" % int(a)
             else:
                 part = str(int(a))
-            part = part + SHORT_TIME_LABELS[i]
+            part = part + TIME_LABELS[i][0]
             result.append(part)
             seconds -= a * interval
             empty = False
     return " ".join(result)
 
+class GluettalaxException(Exception):
+    " Generic GLUEttalax exception "
 
-class CrawlerTimeout(Exception):
-    """ Raised when Glue Crawler a timeout error occurs """
-    pass
+class CrawlerTimeout(GluettalaxException):
+    " Glue crawler timeout error "
 
-class CrawlerNotFound(Exception):
-    pass
+class CrawlerNotFound(GluettalaxException):
+    " Glue crawler not found "
 
-class JobNotFound(Exception):
-    pass
+class JobNotFound(GluettalaxException):
+    " Glue job not found "
 
-class JobConcurrentRunsExceededException(Exception):
-    pass
+class JobTimeout(GluettalaxException):
+    " Glue job timeout error "
+
+class JobConcurrentRunsExceededException(GluettalaxException):
+    " Too many concurrent execution of a Glue job "
+
+class InvalidOption(GluettalaxException):
+    " Invalid option (command line argument) "
+
+class GluettalaxCommandNotFound(GluettalaxException):
+    " GLUEttalax command not found "
+
+
+_glue = boto3.client('glue')
 
 class Crawler(object):
 
@@ -117,16 +135,22 @@ class Crawler(object):
 
     @property
     def status(self):
+        " Return the crawler status "
         try:
             return self.glue.get_crawler(Name=self.name)['Crawler']
-        except self.glue.exceptions.EntityNotFoundException as ex:
-            raise CrawlerNotFound(ex.message)
+        except self.glue.exceptions.EntityNotFoundException:
+            raise CrawlerNotFound('Crawler {} not found'.format(self.name))
 
     @property
     def is_ready(self):
+        " Return true if the craweler is in READY state "
         return self.status['State'] == 'READY'
 
     def run(self, rerun=False):
+        """
+            Start the crawler
+            If the crawler is already running, restart the crawler only if rerun is True
+        """
         if rerun:
             start_time = time.time()
             while not self.is_ready:
@@ -144,11 +168,6 @@ class Crawler(object):
             time.sleep(self.delay)
 
 
-class JobTimeout(Exception):
-    """ Raised when Glue Job a timeout error occurs """
-    pass
-
-
 class Job(object):
 
     def __init__(self, name, delay=DEFAULT_JOB_DELAY, timeout=None, op_async=False):
@@ -159,29 +178,29 @@ class Job(object):
         self.glue = boto3.client('glue')
         try:
             job = self.glue.get_job(JobName=self.name)['Job']
-        except self.glue.exceptions.EntityNotFoundException as ex:
-            raise JobNotFound(ex.message)
+        except self.glue.exceptions.EntityNotFoundException:
+            raise JobNotFound('Job {} not found'.format(self.name))
         if self.timeout is None:
             self.timeout = minutes(job['Timeout'])
 
     def get_runs(self):
         try:
             return list_runs(self.name)
-        except self.glue.exceptions.EntityNotFoundException as ex:
-            raise JobNotFound(ex.message)
+        except self.glue.exceptions.EntityNotFoundException:
+            raise JobNotFound('Job {} not found'.format(self.name))
 
     def get_run_state(self, job_run_id):
         try:
             return self.glue.get_job_run(JobName=self.name, RunId=job_run_id)['JobRun']['JobRunState']
-        except self.glue.exceptions.EntityNotFoundException as ex:
-            raise JobNotFound(ex.message)
+        except self.glue.exceptions.EntityNotFoundException:
+            raise JobNotFound('Job {} not found'.format(self.name))
 
     def run(self, **kargs):
         arguments = dict([('--%s' % k, v) for k, v in kargs.items()])
         try:
             result = self.glue.start_job_run(JobName=self.name, Timeout=int(self.timeout/60), Arguments=arguments)
-        except self.glue.exceptions.EntityNotFoundException as ex:
-            raise JobNotFound(ex.message)
+        except self.glue.exceptions.EntityNotFoundException:
+            raise JobNotFound('Job {} not found'.format(self.name))
         except self.glue.exceptions.ConcurrentRunsExceededException as ex:
             raise JobConcurrentRunsExceededException(ex.message)
         job_run_id = result['JobRunId']
@@ -196,12 +215,13 @@ class Job(object):
             run_state = self.get_run_state(job_run_id)
         return run_state == SUCCEEDED
 
+
 def run_crawler(name, rerun=False, delay=DEFAULT_CRAWLER_DELAY, timeout=DEFAULT_CRAWLER_TIMEOUT, op_async=False):
     timeout = int(timeout)
     return Crawler(name=name, delay=delay, timeout=timeout, op_async=op_async).run()
 
 def list_crawlers(full=False):
-    paginator = boto3.client('glue').get_paginator('get_crawlers')
+    paginator = _glue.get_paginator('get_crawlers')
     pages = paginator.paginate()
     crawlers = []
     for page in pages:
@@ -213,7 +233,7 @@ def run_job(name, delay=DEFAULT_JOB_DELAY, timeout=None, op_async=False, **kargs
     return Job(name=name, delay=delay, timeout=timeout, op_async=op_async).run(**kargs)
 
 def list_jobs(full=False):
-    paginator = boto3.client('glue').get_paginator('get_jobs')
+    paginator = _glue.get_paginator('get_jobs')
     pages = paginator.paginate()
     jobs = []
     for page in pages:
@@ -222,23 +242,26 @@ def list_jobs(full=False):
     return jobs
 
 def list_runs(name, lines=None, include_succeeded=True):
-    paginator = boto3.client('glue').get_paginator('get_job_runs')
-    pages = paginator.paginate(JobName=name)
-    job_runs = []
-    i = 0
-    if lines:
-        lines = int(lines)
-    for page in pages:
-        for job_run in page['JobRuns']:
-            if not include_succeeded and job_run['JobRunState'] == SUCCEEDED:
-                continue
-            job_runs.append(job_run)
-            i = i + 1
+    try:
+        paginator = _glue.get_paginator('get_job_runs')
+        pages = paginator.paginate(JobName=name)
+        job_runs = []
+        i = 0
+        if lines:
+            lines = int(lines)
+        for page in pages:
+            for job_run in page['JobRuns']:
+                if not include_succeeded and job_run['JobRunState'] == SUCCEEDED:
+                    continue
+                job_runs.append(job_run)
+                i = i + 1
+                if lines and i >= lines:
+                    break
             if lines and i >= lines:
                 break
-        if lines and i >= lines:
-            break
-    return job_runs
+        return job_runs
+    except _glue.exceptions.EntityNotFoundException:
+        raise JobNotFound('Job {} not found'.format(name))
 
 def print_job_runs(name=None, include_succeeded=True, lines=None, header=True):
     fmt = '{JobRunState:>10} {AllocatedCapacity:>4} {ExecutionTime:10}  {StartedOn:19}   {JobName} {Arguments}'
@@ -307,7 +330,7 @@ def parse_args(args, defaults=None):
         elif "=" in arg:
             (opt, next_arg) = arg.split("=", 1)
             if not opt.startswith('--'):
-                raise ValueError('invalid option')
+                raise InvalidOption('invalid option')
             opt = opt[2:]
             args.insert(0, next_arg)
         else:
@@ -316,9 +339,9 @@ def parse_args(args, defaults=None):
             elif arg.startswith('--'):
                 opt = arg[2:]
             else:
-                raise ValueError('invalid option')
+                raise InvalidOption('invalid option')
     if opt is not None:
-        raise ValueError('missing value for {0}'.format(opt))
+        raise InvalidOption('missing value for {0}'.format(opt))
     return kargs
 
 @cmd
@@ -344,6 +367,7 @@ def cmd_list_crawlers(argv, header=True):
 @short_help('\n\tPrint Glue jobs list')
 def cmd_list_jobs(argv, header=True):
     fmt = '{Name:40} {AllocatedCapacity:8}  {MaxConcurrentRuns:10}'
+    pattern = argv[1] if len(argv) > 1 else None
     if header:
         print(fmt.format(
             Name='Name',
@@ -351,15 +375,16 @@ def cmd_list_jobs(argv, header=True):
             MaxConcurrentRuns='Max concurrent'))
         print('-' * 70)
     for job in list_jobs(full=True):
-        job['MaxConcurrentRuns'] = job.get('ExecutionProperty', {}).get('MaxConcurrentRuns', '-')
-        print(fmt.format(**job))
+        if not pattern or fnmatch.fnmatch(job['Name'], pattern):
+            job['MaxConcurrentRuns'] = job.get('ExecutionProperty', {}).get('MaxConcurrentRuns', '-')
+            print(fmt.format(**job))
 
 @cmd
 @alias('runc')
-@short_help('run_job <name> [--async] [--param=value ...]\n\tRun a Glue job')
+@short_help('run_job <name> [--async] [--timeout=seconds]\n\tRun a crawler. If not async, wait until execution is finished')
 def cmd_run_crawler(argv):
     if len(argv) < 2:
-        raise ValueError('missing crawler name')
+        raise InvalidOption('missing crawler name')
     name = argv[1]
     default_args = { 'op_async': False, 'timeout': DEFAULT_CRAWLER_TIMEOUT }
     kargs = parse_args(argv[2:], default_args)
@@ -380,17 +405,14 @@ def cmd_list_runs(argv):
 
 @cmd
 @alias('runj')
-@short_help('<name> [--async] [--param=value ...]\n\tRun a Glue job')
+@short_help('<name> [--async] [--param=value ...]\n\tRun a Glue job. if not async, wait until execution is finished')
 def cmd_run_job(argv):
     if len(argv) < 2:
-        raise ValueError('missing job name')
+        raise InvalidOption('missing job name')
     name = argv[1]
     default_args = { 'op_async': False }
     kargs = parse_args(argv[2:], default_args)
-    if run_job(name, **kargs):
-        sys.exit(0)
-    else:
-        sys.exit(1)
+    return 0 if run_job(name, **kargs) else 0
 
 @cmd
 @alias('-h')
@@ -398,12 +420,7 @@ def cmd_help(argv):
     print('usage: gluettalax <command> [parameters]')
     print('')
     print('Commands:')
-    # print(' list_crawlers')
-    # print(' list_jobs')
-    # print(' list_runs [name] [--lines=num]')
-    # print(' run_crawler <name> [--async] [--timeout=seconds]')
-    # print(' run_job <name> [--async] [--param=value ...]')
-    for f in _cmds:
+    for f in sorted(_cmds, key=lambda x: getattr(x, 'cmd')):
         help_text = getattr(f, 'help_text', '') or ''
         print(' {} {}'.format(f.cmd, help_text))
         print('')
@@ -413,29 +430,23 @@ def cmd_help(argv):
         if aliases and f.cmd != 'help':
             print(' {} -> {}'.format(' '.join(aliases), f.cmd))
 
-def main():
-    argv = sys.argv
+def lookup_cmd(cmd):
+    for f in _cmds:
+        if cmd == getattr(f, 'cmd') or cmd in getattr(f, 'aliases', []):
+            return f
+    raise GluettalaxCommandNotFound('Invalid command "{}"; use "help" for a list.'.format(cmd))
+
+def main(argv):
     if len(argv) < 2:
         cmd_help(argv[1:])
-        sys.exit(2)
+        return 2
     cmd = argv[1]
     try:
-        for f in _cmds:
-            if cmd == getattr(f, 'cmd') or cmd in getattr(f, 'aliases', []):
-                f(argv[1:])
-                sys.exit(0)
-        print('Command not found')
-        sys.exit(1)
-    except ValueError as ex:
+        f = lookup_cmd(cmd)
+        return f(argv[1:])
+    except GluettalaxException as ex:
         print(ex)
-        sys.exit(1)
-    except CrawlerNotFound as ex:
-        print(ex)
-        sys.exit(1)
-    except JobNotFound as ex:
-        print(ex)
-        sys.exit(1)
-
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv))
