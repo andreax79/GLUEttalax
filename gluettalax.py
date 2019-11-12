@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # MIT License
 #
@@ -23,13 +23,16 @@
 # SOFTWARE.
 #
 
+import os
 import sys
 import boto3
 import time
 import fnmatch
+from collections import namedtuple
+from inspect import currentframe, getframeinfo
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '0.4.0'
+__version__ = '1.0.0'
 __all__ = [
     'CrawlerTimeout',
     'GluettalaxException',
@@ -37,7 +40,10 @@ __all__ = [
     'CrawlerNotFound',
     'JobNotFound',
     'JobTimeout',
-    'JobConcurrentRunsExceededException',
+    'JobConcurrentRunsExceeded',
+    'TableNotFound',
+    'PartitionNotFound',
+    'PartitionAlreadyExists',
     'InvalidOption',
     'GluettalaxCommandNotFound',
     'Crawler',
@@ -46,7 +52,10 @@ __all__ = [
     'list_crawlers',
     'run_job',
     'list_jobs',
-    'list_runs'
+    'list_runs',
+    'list_partitions',
+    'add_partition',
+    'delete_partition',
 ]
 
 def seconds(x): return x
@@ -88,7 +97,7 @@ def format_time(seconds=0):
         a = seconds // interval
         if a > 0 or (i == 0 and empty):
             if negative:
-                part = "-%d" % int(a)
+                part = '-' + str(int(a))
             else:
                 part = str(int(a))
             part = part + TIME_LABELS[i][0]
@@ -112,8 +121,17 @@ class JobNotFound(GluettalaxException):
 class JobTimeout(GluettalaxException):
     " Glue job timeout error "
 
-class JobConcurrentRunsExceededException(GluettalaxException):
+class JobConcurrentRunsExceeded(GluettalaxException):
     " Too many concurrent execution of a Glue job "
+
+class TableNotFound(GluettalaxException):
+    " Glue table not found "
+
+class PartitionNotFound(GluettalaxException):
+    " Glue partition not found "
+
+class PartitionAlreadyExists(GluettalaxException):
+    " Glue partition already exists "
 
 class InvalidOption(GluettalaxException):
     " Invalid option (command line argument) "
@@ -121,8 +139,10 @@ class InvalidOption(GluettalaxException):
 class GluettalaxCommandNotFound(GluettalaxException):
     " GLUEttalax command not found "
 
-
-_glue = boto3.client('glue')
+if 'AWS_REGION' in os.environ:
+    _glue = boto3.client('glue', os.environ['AWS_REGION'])
+else:
+    _glue = boto3.client('glue')
 
 class Crawler(object):
 
@@ -196,13 +216,13 @@ class Job(object):
             raise JobNotFound('Job {} not found'.format(self.name))
 
     def run(self, **kargs):
-        arguments = dict([('--%s' % k, v) for k, v in kargs.items()])
+        arguments = dict([('--' + k, v) for k, v in kargs.items()])
         try:
             result = self.glue.start_job_run(JobName=self.name, Timeout=int(self.timeout/60), Arguments=arguments)
         except self.glue.exceptions.EntityNotFoundException:
             raise JobNotFound('Job {} not found'.format(self.name))
         except self.glue.exceptions.ConcurrentRunsExceededException as ex:
-            raise JobConcurrentRunsExceededException(ex.message)
+            raise JobConcurrentRunsExceeded(ex.message)
         job_run_id = result['JobRunId']
         start_time = time.time()
         run_state = self.get_run_state(job_run_id)
@@ -282,10 +302,97 @@ def print_job_runs(name=None, include_succeeded=True, lines=None, header=True):
             for run in list_runs(name, include_succeeded=include_succeeded, lines=lines):
                 run['ExecutionTime'] = format_time(run['ExecutionTime'])
                 run['StartedOn'] = run['StartedOn'].isoformat(' ').split('.')[0]
-                run['Arguments'] = ' '.join(['%s %s' % (k, v) for k, v in run['Arguments'].items()])
+                run['Arguments'] = ' '.join([k + ' ' + v for k, v in run['Arguments'].items()])
                 print(fmt.format(**run))
         except IOError: # e.g. Broken pipe
             pass
+
+Partitions = namedtuple('Partitions', ['partition_keys', 'max_lengths', 'data'])
+
+def list_partitions(db, table, header=True):
+    " List Glue partitions "
+    # Get table metadata
+    try:
+        response = _glue.get_table(
+            DatabaseName=db,
+            Name=table
+        )
+    except _glue.exceptions.EntityNotFoundException:
+        raise TableNotFound('Table {} not found'.format(table))
+    partition_keys = [x['Name'] for x in response['Table']['PartitionKeys']]
+    # Get partitions
+    data = []
+    lengths = [len(x) for x in partition_keys] # calculate the labels lengths
+    paginator = _glue.get_paginator('get_partitions')
+    pages = paginator.paginate(DatabaseName=db, TableName=table)
+    for page in pages:
+        for partition in page['Partitions']:
+            values = partition['Values']
+            lengths = [max(l, len(str(values[i]))) for i, l in enumerate(lengths)] # values lengths
+            location =  partition['StorageDescriptor'].get('Location', '-')
+            data.append(values + [ location ])
+    data = sorted(data, key=lambda row: row[-1])
+    return Partitions(partition_keys, lengths, data)
+
+def add_partition(db, table, kargs):
+    " Create a new Glue partion "
+    response = _glue.get_table(
+        DatabaseName=db,
+        Name=table
+    )
+    partition_keys = response['Table']['PartitionKeys']
+    if len(kargs) != len(partition_keys):
+        raise InvalidOption('{} partitions required ({})'.format(
+            len(partition_keys),
+            ' '.join(['--{}=XXX'.format(x['Name']) for x in partition_keys])
+        ))
+    partition_values = [kargs[x['Name']] for x in partition_keys]
+    # Parsing table info required to create partitions from table
+    input_format = response['Table']['StorageDescriptor']['InputFormat']
+    output_format = response['Table']['StorageDescriptor']['OutputFormat']
+    table_location = response['Table']['StorageDescriptor']['Location']
+    serde_info = response['Table']['StorageDescriptor']['SerdeInfo']
+    partition_keys = response['Table']['PartitionKeys']
+    path = '/'.join(['{}={}'.format(x['Name'], kargs[x['Name']]) for x in partition_keys]) + '/'
+    partition_input = {
+            'Values': partition_values,
+            'StorageDescriptor': {
+                'Location': table_location + path,
+                'InputFormat': input_format,
+                'OutputFormat': output_format,
+                'SerdeInfo': serde_info
+            }
+        }
+    try:
+        return _glue.create_partition(
+            DatabaseName=db,
+            TableName=table,
+            PartitionInput=partition_input
+        )
+    except _glue.exceptions.AlreadyExistsException:
+        raise PartitionAlreadyExists('Partition [{}] already exists'.format(', '.join(partition_values)))
+
+def delete_partition(db, table, kargs):
+    " Deletes a Glue partition "
+    response = _glue.get_table(
+        DatabaseName=db,
+        Name=table
+    )
+    partition_keys = response['Table']['PartitionKeys']
+    if len(kargs) != len(partition_keys):
+        raise InvalidOption('{} partitions required ({})'.format(
+            len(partition_keys),
+            ' '.join(['--{}=XXX'.format(x['Name']) for x in partition_keys])
+        ))
+    partition_values = [kargs[x['Name']] for x in partition_keys]
+    try:
+        return _glue.delete_partition(
+            DatabaseName=db,
+            TableName=table,
+            PartitionValues=partition_values
+        )
+    except _glue.exceptions.EntityNotFoundException:
+        raise PartitionNotFound('Partition [{}] not found'.format(', '.join(partition_values)))
 
 _cmds = []
 
@@ -301,53 +408,110 @@ def alias(*aliases):
         def wrapped_f(*args, **kargs):
             f(*args, **kargs)
         wrapped_f.__name__ = f.__name__
-        wrapped_f.help_text = getattr(f, 'help_text', None)
+        wrapped_f.usage = getattr(f, 'usage', None)
+        wrapped_f.__doc__ = getattr(f, '__doc__', None)
         wrapped_f.aliases = aliases
         return wrapped_f
     return wrap
 
-def short_help(help_text):
-    " Command help decorator "
+def usage(usage):
+    " Command usage decorator "
     def wrap(f):
         def wrapped_f(*args, **kargs):
             f(*args, **kargs)
         wrapped_f.__name__ = f.__name__
-        wrapped_f.help_text = help_text
+        wrapped_f.usage = usage
         wrapped_f.aliases = getattr(f, 'aliases', None)
+        wrapped_f.__doc__ = getattr(f, '__doc__', None)
         return wrapped_f
     return wrap
 
-def parse_args(args, defaults=None):
+def this_fn():
+    " Return the caller function "
+    caller = currentframe().f_back
+    func_name = getframeinfo(caller)[2]
+    return caller.f_back.f_locals.get(func_name, caller.f_globals.get(func_name))
+
+def parse_usage(usage):
+    " Parse usage help line "
+    usage = usage.split('\n')[0].split()
+    required = []
+    optionals = []
+    arguments = {}
+    while usage:
+        item = usage.pop(0)
+        if not item.startswith('['):
+            required.append(item)
+        else:
+            item = item.strip('[]')
+            if item[0] != '-':
+                optionals.append(item)
+            else:
+                item = item.lstrip('-')
+                if '=' in item:
+                    item = item.split('=')[0]
+                    arguments[item] = str
+                else:
+                    arguments[item] = bool
+    return required, optionals, arguments
+
+def parse_args(args, usage, defaults=None):
     " Parse command lines arguments "
+    required, optionals, arguments = parse_usage(usage)
+    result = []
     kargs = dict(defaults or {})
     opt = None
+    args.pop(0) # args[0] is the command
     while args:
         arg = args.pop(0)
-        if opt is not None:
+        if opt is not None: # arguments value
             value = arg
             kargs[opt] = value
             opt = None
-        elif "=" in arg:
+        elif required: # required positional argument
+            result.append(arg)
+            required.pop(0)
+        elif optionals and arg[0] != '-': # optional positional argument
+            result.append(arg)
+            optionals.pop(0)
+        elif "=" in arg: # argument --key=value
             (opt, next_arg) = arg.split("=", 1)
             if not opt.startswith('--'):
-                raise InvalidOption('invalid option')
+                raise InvalidOption('invalid option: ' + arg)
             opt = opt[2:]
             args.insert(0, next_arg)
         else:
-            if arg == '-async' or arg == '--async':
-                kargs['op_async'] = True
-            elif arg.startswith('--'):
-                opt = arg[2:]
+            if not arg.startswith('--'):
+                raise InvalidOption('invalid option: ' + arg)
+            t = arg[2:]
+            if arguments.get(t) == bool: # boolean arg
+                kargs['op_' + t] = True
             else:
-                raise InvalidOption('invalid option')
+                opt = t
     if opt is not None:
         raise InvalidOption('missing value for {0}'.format(opt))
-    return kargs
+    if required: # check missing required values
+        raise InvalidOption('missing {}'.format(required.pop(0)))
+    while optionals: # add missing optional values
+        result.append(None)
+        optionals.pop()
+    if not result: # no positional argument
+        return kargs
+    else:
+        result.append(kargs)
+        return result
 
 @cmd
 @alias('lsc')
-@short_help('\n\tPrint crawlers list')
-def cmd_list_crawlers(argv, header=True):
+@usage('[pattern] [--noheaders]')
+def cmd_list_crawlers(argv):
+    """
+        List Glue crawlers.
+        Example: list_crawlers 'test*' --noheaders
+    """
+    default_args = { 'op_noheaders': False }
+    pattern, kargs = parse_args(argv, this_fn().usage, default_args)
+    header = not kargs['op_noheaders']
     fmt = '{Name:40} {State:10} {CrawlElapsedTime}'
     if header:
         print(fmt.format(
@@ -356,18 +520,25 @@ def cmd_list_crawlers(argv, header=True):
             CrawlElapsedTime=''))
         print('-' * 70)
     for crawler in list_crawlers(full=True):
-        if crawler['State'] == 'RUNNING':
-            crawler['CrawlElapsedTime'] = format_time(crawler['CrawlElapsedTime']/1000)
-        else:
-            crawler['CrawlElapsedTime'] = ''
-        print(fmt.format(**crawler))
+        if not pattern or fnmatch.fnmatch(crawler['Name'], pattern):
+            if crawler['State'] == 'RUNNING':
+                crawler['CrawlElapsedTime'] = format_time(crawler['CrawlElapsedTime']/1000)
+            else:
+                crawler['CrawlElapsedTime'] = ''
+            print(fmt.format(**crawler))
 
 @cmd
 @alias('lsj')
-@short_help('\n\tPrint Glue jobs list')
-def cmd_list_jobs(argv, header=True):
+@usage('[pattern] [--noheaders]')
+def cmd_list_jobs(argv):
+    """
+        List Glue jobs.
+        Example: list_jobs 'test*'
+    """
+    default_args = { 'op_noheaders': False }
+    pattern, kargs = parse_args(argv, this_fn().usage, default_args)
+    header = not kargs['op_noheaders']
     fmt = '{Name:40} {AllocatedCapacity:8}  {MaxConcurrentRuns:10}'
-    pattern = argv[1] if len(argv) > 1 else None
     if header:
         print(fmt.format(
             Name='Name',
@@ -381,54 +552,113 @@ def cmd_list_jobs(argv, header=True):
 
 @cmd
 @alias('runc')
-@short_help('run_job <name> [--async] [--timeout=seconds]\n\tRun a crawler. If not async, wait until execution is finished')
+@usage('<crawler_name> [--async] [--timeout=seconds]')
 def cmd_run_crawler(argv):
-    if len(argv) < 2:
-        raise InvalidOption('missing crawler name')
-    name = argv[1]
+    """
+        Run a crawler. If not async, wait until execution is finished.
+        Example: run_crawler my_usage_crawler --async
+    """
     default_args = { 'op_async': False, 'timeout': DEFAULT_CRAWLER_TIMEOUT }
-    kargs = parse_args(argv[2:], default_args)
+    name, kargs = parse_args(argv, this_fn().usage, default_args)
     run_crawler(name, **kargs)
 
 @cmd
 @alias('lsr')
-@short_help('[name] [--lines=num]\n\tPrint jobs history')
+@usage('[job_name] [--lines=num] [--noheaders]')
 def cmd_list_runs(argv):
-    if len(argv) > 1 and not argv[1].startswith('-'):
-        name = argv[1]
-        argv.pop(1)
-    else:
-        name = None
-    default_args = { 'lines': None }
-    kargs = parse_args(argv[1:], default_args)
-    print_job_runs(name, lines=kargs['lines'])
+    """
+        Print Glue jobs history.
+        Example: list_runs my_batch_job --lines 10
+    """
+    default_args = { 'lines': None, 'op_noheaders': False }
+    name, kargs = parse_args(argv, this_fn().usage, default_args)
+    header = not kargs['op_noheaders']
+    print_job_runs(name, lines=kargs['lines'], header=header)
 
 @cmd
 @alias('runj')
-@short_help('<name> [--async] [--param=value ...]\n\tRun a Glue job. if not async, wait until execution is finished')
+@usage('<job_name> [--async] [--param1=value...]')
 def cmd_run_job(argv):
-    if len(argv) < 2:
-        raise InvalidOption('missing job name')
-    name = argv[1]
+    """
+        Run a Glue job. if not async, wait until execution is finished.
+        Example: cmd_run_job --DATALAKE_BUCKET=test --THE_DATE=20191112 --HOUR=15
+    """
     default_args = { 'op_async': False }
-    kargs = parse_args(argv[2:], default_args)
+    name, kargs = parse_args(argv, this_fn().usage, default_args)
     return 0 if run_job(name, **kargs) else 0
 
 @cmd
+@alias('lsp')
+@usage('<db> <table> [--noheaders]')
+def cmd_list_partitions(argv):
+    """
+        List the partitions in a table.
+        Example: list_partitions datalake usage
+    """
+    default_args = { 'op_noheaders': False }
+    db, table, kargs = parse_args(argv, this_fn().usage, default_args)
+    header = not kargs['op_noheaders']
+    result = list_partitions(db, table, header)
+    fmt = '  '.join([ '{:%d}' % x for x in result.max_lengths ]) + '  {}'
+    # Print header
+    if header:
+        print(fmt.format(*(result.partition_keys + [ 'Location'])))
+        print('-' * 70)
+    # Print partitions
+    for line in result.data:
+        print(fmt.format(*line))
+
+@cmd
+@alias('addp')
+@usage('<db> <table> [--partition1=value...]')
+def cmd_add_partition(argv):
+    """
+        Create a new Glue partition.
+        Example: add_partition datalake usage --year=2019 --month=09
+    """
+    db, table, kargs = parse_args(argv, this_fn().usage)
+    add_partition(db, table, kargs)
+    print('Partition added')
+
+@cmd
+@alias('rmp')
+@usage('<db> <table> [--partition1=value...]')
+def cmd_del_partition(argv):
+    """
+        Delete a Glue partition.
+        Example: del_partition datalake usage --year=2019 --month=09
+    """
+    db, table, kargs = parse_args(argv, this_fn().usage)
+    delete_partition(db, table, kargs)
+    print('Partition deleted')
+
+@cmd
 @alias('-h')
+@usage('[command]')
 def cmd_help(argv):
-    print('usage: gluettalax <command> [parameters]')
-    print('')
-    print('Commands:')
-    for f in sorted(_cmds, key=lambda x: getattr(x, 'cmd')):
-        help_text = getattr(f, 'help_text', '') or ''
-        print(' {} {}'.format(f.cmd, help_text))
+    """
+        Display information about commands.
+    """
+    command, kargs = parse_args(argv, this_fn().usage)
+    if command:
+        f = lookup_cmd(command)
+        usage_text = getattr(f, 'usage', '')
+        help_text = (getattr(f, '__doc__', '') or '').rstrip('\n\t ')
+        print('usage: gluettalax {} {} {}'.format(f.cmd, usage_text, help_text))
+    else:
+        print('usage: gluettalax <command> [parameters]')
         print('')
-    print('Command aliases:')
-    for f in _cmds:
-        aliases = sorted(getattr(f, 'aliases', []))
-        if aliases and f.cmd != 'help':
-            print(' {} -> {}'.format(' '.join(aliases), f.cmd))
+        print('Commands:')
+        for f in sorted(_cmds, key=lambda x: getattr(x, 'cmd')):
+            usage_text = getattr(f, 'usage', '')
+            help_text = (getattr(f, '__doc__', '') or '').rstrip('\n\t ')
+            print(' {} {} {}'.format(f.cmd, usage_text, help_text))
+            print('')
+        print('Command aliases:')
+        for f in _cmds:
+            aliases = sorted(getattr(f, 'aliases', []))
+            if aliases and f.cmd != 'help':
+                print(' {} -> {}'.format(' '.join(aliases), f.cmd))
 
 def lookup_cmd(cmd):
     for f in _cmds:
@@ -440,9 +670,8 @@ def main(argv):
     if len(argv) < 2:
         cmd_help(argv[1:])
         return 2
-    cmd = argv[1]
     try:
-        f = lookup_cmd(cmd)
+        f = lookup_cmd(argv[1])
         return f(argv[1:])
     except GluettalaxException as ex:
         print(ex)

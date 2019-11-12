@@ -15,6 +15,7 @@ setup(
     version = __version__,
     description = 'Glue ETL without constipation',
     long_description = long_description,
+    long_description_content_type='text/markdown',
     url = 'https://github.com/andreax79/GLUEttalax',
     author = 'Andrea Bonomi',
     author_email = 'andrea.bonomi@gmail.com',
@@ -27,14 +28,13 @@ setup(
         'Operating System :: OS Independent',
         'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.1',
-        'Programming Language :: Python :: 3.2',
         'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
-        ],
+        'Programming Language :: Python :: 3.8',
+    ],
     zip_safe=True,
     include_package_data=True,
     keywords = 'aws glue cli',
@@ -43,6 +43,9 @@ setup(
     entry_points = {
         'console_scripts': [
             'gluettalax=gluettalax:main',
-            ],
-        }
-    )
+        ],
+    },
+    test_suite='nose.collector',
+    tests_require=['nose'],
+)
+

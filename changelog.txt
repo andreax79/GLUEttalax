@@ -10,7 +10,7 @@
 
 ## 0.2.0
 
-2017-06-28
+2019-06-28
 
 ### Fix
 
@@ -21,3 +21,21 @@
 - async option
 - a changelog :)
 
+## 0.3.0
+
+2019-06-27
+
+### Added
+
+- help
+- configurable crawler timeout
+
+## 1.0.0
+
+2019-11-12
+
+### Added
+
+- usage line parser
+- list/add/delete table partitions
+- tests
