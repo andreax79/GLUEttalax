@@ -32,7 +32,7 @@ from collections import namedtuple
 from inspect import currentframe, getframeinfo
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 __all__ = [
     'CrawlerTimeout',
     'GluettalaxException',
@@ -461,7 +461,8 @@ def parse_args(args, usage, defaults=None):
     result = []
     kargs = dict(defaults or {})
     opt = None
-    args.pop(0) # args[0] is the command
+    if args:
+        args.pop(0) # args[0] is the command
     while args:
         arg = args.pop(0)
         if opt is not None: # arguments value
@@ -666,7 +667,9 @@ def lookup_cmd(cmd):
             return f
     raise GluettalaxCommandNotFound('Invalid command "{}"; use "help" for a list.'.format(cmd))
 
-def main(argv):
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv
     if len(argv) < 2:
         cmd_help(argv[1:])
         return 2

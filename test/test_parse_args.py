@@ -36,6 +36,14 @@ default_args_3 = { 'op_async': False }
 
 class TestParseArgs(TestCase):
 
+    def test_none(self):
+        args = None
+        name, kargs = parse_args(args, help_text_2)
+
+    def test_empty_list(self):
+        args = []
+        name, kargs = parse_args(args, help_text_2)
+
     def test_parse_ok_1_full(self):
         args = [ 'run_crawler', 'NAME', '--async', '--timeout=456' ]
         name, kargs = parse_args(args, help_text_1, default_args_1)
