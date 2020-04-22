@@ -28,11 +28,12 @@ import sys
 import boto3
 import time
 import fnmatch
+import unidecode
 from collections import namedtuple
 from inspect import currentframe, getframeinfo
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '1.0.1'
+__version__ = '1.0.2'
 __all__ = [
     'CrawlerTimeout',
     'GluettalaxException',
@@ -109,6 +110,9 @@ def format_time(seconds=0):
 class GluettalaxException(Exception):
     " Generic GLUEttalax exception "
 
+class GluettalaxWarning(GluettalaxException):
+    " Generic GLUEttalax warning (exit with 0 status) "
+
 class CrawlerTimeout(GluettalaxException):
     " Glue crawler timeout error "
 
@@ -130,7 +134,7 @@ class TableNotFound(GluettalaxException):
 class PartitionNotFound(GluettalaxException):
     " Glue partition not found "
 
-class PartitionAlreadyExists(GluettalaxException):
+class PartitionAlreadyExists(GluettalaxWarning):
     " Glue partition already exists "
 
 class InvalidOption(GluettalaxException):
@@ -394,6 +398,20 @@ def delete_partition(db, table, kargs):
     except _glue.exceptions.EntityNotFoundException:
         raise PartitionNotFound('Partition [{}] not found'.format(', '.join(partition_values)))
 
+Table = namedtuple('Table', ['table_name', 'database_name'])
+
+def list_tables():
+    response = _glue.search_tables()
+    tables = []
+    while response:
+        for table in response['TableList']:
+            tables.append(Table(table_name=table['Name'], database_name=table['DatabaseName']))
+        if response.get('NextToken'):
+            response = _glue.search_tables(NextToken=response.get('NextToken'))
+        else:
+            response = None
+    return tables
+
 _cmds = []
 
 def cmd(f):
@@ -634,6 +652,27 @@ def cmd_del_partition(argv):
     print('Partition deleted')
 
 @cmd
+@alias('lst')
+@usage('[pattern] [--noheaders]')
+def cmd_list_tables(argv):
+    """
+        List Glue crawlers.
+        Example: list_tables 'test*' --noheaders
+    """
+    default_args = { 'op_noheaders': False }
+    pattern, kargs = parse_args(argv, this_fn().usage, default_args)
+    header = not kargs['op_noheaders']
+    fmt = '{database_name:40} {table_name}'
+    if header:
+        print(fmt.format(
+            database_name='Database',
+            table_name='Name'))
+        print('-' * 70)
+    for table in list_tables():
+        if not pattern or fnmatch.fnmatch(table['Name'], pattern):
+            print(fmt.format(database_name=table.database_name, table_name=table.table_name))
+
+@cmd
 @alias('-h')
 @usage('[command]')
 def cmd_help(argv):
@@ -657,13 +696,13 @@ def cmd_help(argv):
             print('')
         print('Command aliases:')
         for f in _cmds:
-            aliases = sorted(getattr(f, 'aliases', []))
+            aliases = sorted(getattr(f, 'aliases') or [])
             if aliases and f.cmd != 'help':
                 print(' {} -> {}'.format(' '.join(aliases), f.cmd))
 
 def lookup_cmd(cmd):
     for f in _cmds:
-        if cmd == getattr(f, 'cmd') or cmd in getattr(f, 'aliases', []):
+        if cmd == getattr(f, 'cmd') or cmd in (getattr(f, 'aliases') or []):
             return f
     raise GluettalaxCommandNotFound('Invalid command "{}"; use "help" for a list.'.format(cmd))
 
@@ -676,6 +715,9 @@ def main(argv=None):
     try:
         f = lookup_cmd(argv[1])
         return f(argv[1:])
+    except GluettalaxWarning as ex:
+        print(ex)
+        return 0
     except GluettalaxException as ex:
         print(ex)
         return 1

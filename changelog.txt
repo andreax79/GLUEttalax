@@ -39,3 +39,23 @@
 - usage line parser
 - list/add/delete table partitions
 - tests
+
+## 1.0.1
+
+2019-11-12
+
+### Fix
+
+- help
+
+## 1.0.2
+
+2020-04-22
+
+### Added
+
+- list tables
+
+### Fix
+
+- add_partition returns exit status 0 if partition already exist
