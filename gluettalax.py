@@ -28,12 +28,11 @@ import sys
 import boto3
 import time
 import fnmatch
-import unidecode
 from collections import namedtuple
 from inspect import currentframe, getframeinfo
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '1.0.2'
+__version__ = '1.0.3'
 __all__ = [
     'CrawlerTimeout',
     'GluettalaxException',

@@ -59,3 +59,11 @@
 ### Fix
 
 - add_partition returns exit status 0 if partition already exist
+
+## 1.0.3
+
+2020-04-22
+
+### Fix
+
+- import fix
