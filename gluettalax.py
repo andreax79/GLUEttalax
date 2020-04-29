@@ -32,7 +32,7 @@ from collections import namedtuple
 from inspect import currentframe, getframeinfo
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '1.0.3'
+__version__ = '1.0.4'
 __all__ = [
     'CrawlerTimeout',
     'GluettalaxException',
@@ -607,14 +607,14 @@ def cmd_run_job(argv):
 
 @cmd
 @alias('lsp')
-@usage('<db> <table> [--noheaders]')
+@usage('<db> <table> [pattern] [--noheaders]')
 def cmd_list_partitions(argv):
     """
         List the partitions in a table.
         Example: list_partitions datalake usage
     """
     default_args = { 'op_noheaders': False }
-    db, table, kargs = parse_args(argv, this_fn().usage, default_args)
+    db, table, pattern, kargs = parse_args(argv, this_fn().usage, default_args)
     header = not kargs['op_noheaders']
     result = list_partitions(db, table, header)
     fmt = '  '.join([ '{:%d}' % x for x in result.max_lengths ]) + '  {}'
@@ -624,7 +624,8 @@ def cmd_list_partitions(argv):
         print('-' * 70)
     # Print partitions
     for line in result.data:
-        print(fmt.format(*line))
+        if not pattern or any([ fnmatch.fnmatch(x, pattern) for x in line ]):
+            print(fmt.format(*line))
 
 @cmd
 @alias('addp')
