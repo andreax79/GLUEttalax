@@ -75,3 +75,8 @@
 ### Added
 
 - filter partitions by pattern
+
+### Fix
+
+- fix add partition for not-Hive style partitions
+

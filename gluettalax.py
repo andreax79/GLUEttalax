@@ -356,7 +356,12 @@ def add_partition(db, table, kargs):
     table_location = response['Table']['StorageDescriptor']['Location']
     serde_info = response['Table']['StorageDescriptor']['SerdeInfo']
     partition_keys = response['Table']['PartitionKeys']
-    path = '/'.join(['{}={}'.format(x['Name'], kargs[x['Name']]) for x in partition_keys]) + '/'
+    if all([ x.startswith('partition_') for x in kargs ]):
+        # not-Hive style partitions
+        path = '/'.join(partition_values) + '/'
+    else:
+        # Hive style partitions
+        path = '/'.join(['{}={}'.format(x['Name'], kargs[x['Name']]) for x in partition_keys]) + '/'
     partition_input = {
             'Values': partition_values,
             'StorageDescriptor': {
