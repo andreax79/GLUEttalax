@@ -32,7 +32,7 @@ from collections import namedtuple
 from inspect import currentframe, getframeinfo
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '1.0.4'
+__version__ = '1.0.5'
 __all__ = [
     'CrawlerTimeout',
     'GluettalaxException',
@@ -354,6 +354,8 @@ def add_partition(db, table, kargs):
     input_format = response['Table']['StorageDescriptor']['InputFormat']
     output_format = response['Table']['StorageDescriptor']['OutputFormat']
     table_location = response['Table']['StorageDescriptor']['Location']
+    if not table_location.endswith('/'):
+        table_location = table_location + '/'
     serde_info = response['Table']['StorageDescriptor']['SerdeInfo']
     partition_keys = response['Table']['PartitionKeys']
     if all([ x.startswith('partition_') for x in kargs ]):
