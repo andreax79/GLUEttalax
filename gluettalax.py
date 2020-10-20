@@ -30,9 +30,10 @@ import time
 import fnmatch
 from collections import namedtuple
 from inspect import currentframe, getframeinfo
+from urllib.parse import urlparse
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '1.0.5'
+__version__ = '1.0.6'
 __all__ = [
     'CrawlerTimeout',
     'GluettalaxException',
@@ -55,6 +56,7 @@ __all__ = [
     'list_runs',
     'list_partitions',
     'add_partition',
+    'add_partitions_by_location',
     'delete_partition',
 ]
 
@@ -336,6 +338,57 @@ def list_partitions(db, table, header=True):
             data.append(values + [ location ])
     data = sorted(data, key=lambda row: row[-1])
     return Partitions(partition_keys, lengths, data)
+
+def add_partitions_by_location(db, table, location, kargs):
+    s3 = boto3.resource('s3')
+    # Get s3 partitions
+    url = urlparse(location)
+    bucket = s3.Bucket(url.netloc)
+    bucket_files = [x.key for x in bucket.objects.filter(Prefix=url.path[1:]).all()]
+    bucket_dirs = sorted(list(set([os.path.dirname(x) for x in bucket_files])))
+    # Parsing table info required to create partitions from table
+    response = _glue.get_table(
+        DatabaseName=db,
+        Name=table
+    )
+    input_format = response['Table']['StorageDescriptor']['InputFormat']
+    output_format = response['Table']['StorageDescriptor']['OutputFormat']
+    serde_info = response['Table']['StorageDescriptor']['SerdeInfo']
+    partition_keys = response['Table']['PartitionKeys']
+    # Iterate over dirs
+    for path in bucket_dirs:
+        partition_url = 's3://{}/{}/'.format(url.netloc, path)
+        parts = path.split('/')
+        try:
+            index = [i for i, k in enumerate(parts) if k.startswith(partition_keys[0]['Name'] + '=')][0]
+        except Exception:
+            print('Skip {}'.format(partition_url))
+        parts = parts[index:]
+        partition_values = []
+        for i, k in enumerate(partition_keys):
+            if parts[i].startswith(k['Name'] + '='):
+                partition_values.append(parts[i].split('=', 1)[1])
+        if len(partition_values) != len(partition_keys):
+            print('Skip {}'.format(partition_url))
+        # Add partition
+        partition_input = {
+                'Values': partition_values,
+                'StorageDescriptor': {
+                    'Location': partition_url,
+                    'InputFormat': input_format,
+                    'OutputFormat': output_format,
+                    'SerdeInfo': serde_info
+                }
+            }
+        try:
+            _glue.create_partition(
+                DatabaseName=db,
+                TableName=table,
+                PartitionInput=partition_input
+            )
+            print('Partition [{}] added'.format(path))
+        except _glue.exceptions.AlreadyExistsException:
+            print('Partition [{}] already exists'.format(path))
 
 def add_partition(db, table, kargs):
     " Create a new Glue partion "
@@ -645,6 +698,16 @@ def cmd_add_partition(argv):
     db, table, kargs = parse_args(argv, this_fn().usage)
     add_partition(db, table, kargs)
     print('Partition added')
+
+@cmd
+@usage('<db> <table> [s3_path]')
+def cmd_add_partitions(argv):
+    """
+        Create new Glue partitions in a given location.
+        Example: add_partition datalake usage s3://example/usage/year=2020/month=10
+    """
+    db, table, location, kargs = parse_args(argv, this_fn().usage)
+    add_partitions_by_location(db, table, location, kargs)
 
 @cmd
 @alias('rmp')
