@@ -80,3 +80,10 @@
 
 - fix add partition for not-Hive style partitions
 
+## 1.0.7
+
+2021-06-07
+
+### Added
+
+- boto3 session cache (for multi-factor authentication)

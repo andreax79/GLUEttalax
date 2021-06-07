@@ -25,6 +25,8 @@
 
 import os
 import sys
+import botocore.credentials
+import botocore.session
 import boto3
 import time
 import fnmatch
@@ -33,7 +35,7 @@ from inspect import currentframe, getframeinfo
 from urllib.parse import urlparse
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '1.0.6'
+__version__ = '1.0.7'
 __all__ = [
     'CrawlerTimeout',
     'GluettalaxException',
@@ -144,10 +146,20 @@ class InvalidOption(GluettalaxException):
 class GluettalaxCommandNotFound(GluettalaxException):
     " GLUEttalax command not found "
 
-if 'AWS_REGION' in os.environ:
-    _glue = boto3.client('glue', os.environ['AWS_REGION'])
-else:
-    _glue = boto3.client('glue')
+
+def get_glue():
+    # botocore session cache
+    cli_cache = os.path.join(os.path.expanduser('~'),'.aws/cli/cache')
+    session = botocore.session.get_session()
+    session.get_component('credential_provider').get_provider('assume-role').cache = botocore.credentials.JSONFileCache(cli_cache)
+    # create boto3 client from session
+    if 'AWS_REGION' in os.environ:
+        return boto3.Session(botocore_session=session).client('glue', os.environ['AWS_REGION'])
+    else:
+        return boto3.Session(botocore_session=session).client('glue')
+
+_glue = get_glue()
+
 
 class Crawler(object):
 
