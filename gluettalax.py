@@ -403,11 +403,16 @@ def add_partitions_by_location(db, table, location, kargs):
             print('Partition [{}] already exists'.format(path))
 
 def add_partition(db, table, kargs):
-    " Create a new Glue partion "
+    " Create a new Glue partition "
+    location = kargs.get('location')
+    if 'location' in kargs:
+        del kargs['location']
+    # Get glue table
     response = _glue.get_table(
         DatabaseName=db,
         Name=table
     )
+    # Check partition keys
     partition_keys = response['Table']['PartitionKeys']
     if len(kargs) != len(partition_keys):
         raise InvalidOption('{} partitions required ({})'.format(
@@ -419,20 +424,22 @@ def add_partition(db, table, kargs):
     input_format = response['Table']['StorageDescriptor']['InputFormat']
     output_format = response['Table']['StorageDescriptor']['OutputFormat']
     table_location = response['Table']['StorageDescriptor']['Location']
-    if not table_location.endswith('/'):
-        table_location = table_location + '/'
     serde_info = response['Table']['StorageDescriptor']['SerdeInfo']
     partition_keys = response['Table']['PartitionKeys']
-    if all([ x.startswith('partition_') for x in kargs ]):
-        # not-Hive style partitions
-        path = '/'.join(partition_values) + '/'
-    else:
-        # Hive style partitions
-        path = '/'.join(['{}={}'.format(x['Name'], kargs[x['Name']]) for x in partition_keys]) + '/'
+    if not location:
+        if not table_location.endswith('/'):
+            table_location = table_location + '/'
+        if all([ x.startswith('partition_') for x in kargs ]):
+            # not-Hive style partitions
+            path = '/'.join(partition_values) + '/'
+        else:
+            # Hive style partitions
+            path = '/'.join(['{}={}'.format(x['Name'], kargs[x['Name']]) for x in partition_keys]) + '/'
+        location = table_location + path
     partition_input = {
             'Values': partition_values,
             'StorageDescriptor': {
-                'Location': table_location + path,
+                'Location': location,
                 'InputFormat': input_format,
                 'OutputFormat': output_format,
                 'SerdeInfo': serde_info
@@ -701,7 +708,7 @@ def cmd_list_partitions(argv):
 
 @cmd
 @alias('addp')
-@usage('<db> <table> [--partition1=value...]')
+@usage('<db> <table> [--partition1=value...] [--location=path]')
 def cmd_add_partition(argv):
     """
         Create a new Glue partition.
