@@ -180,16 +180,13 @@ def get_glue():
         return boto3.Session(botocore_session=session).client('glue')
 
 
-_glue = get_glue()
-
-
 class Crawler(object):
     def __init__(self, name, delay=DEFAULT_CRAWLER_DELAY, timeout=DEFAULT_CRAWLER_TIMEOUT, op_async=False):
         self.name = name
         self.delay = delay
         self.timeout = timeout
         self.op_async = op_async
-        self.glue = boto3.client('glue')
+        self.glue = get_glue()
 
     @property
     def status(self):
@@ -279,7 +276,8 @@ def run_crawler(name, rerun=False, delay=DEFAULT_CRAWLER_DELAY, timeout=DEFAULT_
 
 
 def list_crawlers(full=False):
-    paginator = _glue.get_paginator('get_crawlers')
+    glue = get_glue()
+    paginator = glue.get_paginator('get_crawlers')
     pages = paginator.paginate()
     crawlers = []
     for page in pages:
@@ -293,7 +291,8 @@ def run_job(name, delay=DEFAULT_JOB_DELAY, timeout=None, op_async=False, **kargs
 
 
 def list_jobs(full=False):
-    paginator = _glue.get_paginator('get_jobs')
+    glue = get_glue()
+    paginator = glue.get_paginator('get_jobs')
     pages = paginator.paginate()
     jobs = []
     for page in pages:
@@ -303,8 +302,9 @@ def list_jobs(full=False):
 
 
 def list_runs(name, lines=None, include_succeeded=True):
+    glue = get_glue()
     try:
-        paginator = _glue.get_paginator('get_job_runs')
+        paginator = glue.get_paginator('get_job_runs')
         pages = paginator.paginate(JobName=name)
         job_runs = []
         i = 0
@@ -321,7 +321,7 @@ def list_runs(name, lines=None, include_succeeded=True):
             if lines and i >= lines:
                 break
         return job_runs
-    except _glue.exceptions.EntityNotFoundException:
+    except glue.exceptions.EntityNotFoundException:
         raise JobNotFound('Job {} not found'.format(name))
 
 
@@ -359,15 +359,16 @@ Partitions = namedtuple('Partitions', ['partition_keys', 'max_lengths', 'data'])
 def list_partitions(db, table, header=True):
     "List Glue partitions"
     # Get table metadata
+    glue = get_glue()
     try:
-        response = _glue.get_table(DatabaseName=db, Name=table)
-    except _glue.exceptions.EntityNotFoundException:
+        response = glue.get_table(DatabaseName=db, Name=table)
+    except glue.exceptions.EntityNotFoundException:
         raise TableNotFound('Table {} not found'.format(table))
     partition_keys = [x['Name'] for x in response['Table']['PartitionKeys']]
     # Get partitions
     data = []
     lengths = [len(x) for x in partition_keys]  # calculate the labels lengths
-    paginator = _glue.get_paginator('get_partitions')
+    paginator = glue.get_paginator('get_partitions')
     pages = paginator.paginate(DatabaseName=db, TableName=table)
     for page in pages:
         for partition in page['Partitions']:
@@ -380,6 +381,7 @@ def list_partitions(db, table, header=True):
 
 
 def add_partitions_by_location(db, table, location, kargs):
+    glue = get_glue()
     s3 = boto3.resource('s3')
     # Get s3 partitions
     url = urlparse(location)
@@ -387,7 +389,7 @@ def add_partitions_by_location(db, table, location, kargs):
     bucket_files = [x.key for x in bucket.objects.filter(Prefix=url.path[1:]).all()]
     bucket_dirs = sorted(list(set([os.path.dirname(x) for x in bucket_files])))
     # Parsing table info required to create partitions from table
-    response = _glue.get_table(DatabaseName=db, Name=table)
+    response = glue.get_table(DatabaseName=db, Name=table)
     input_format = response['Table']['StorageDescriptor']['InputFormat']
     output_format = response['Table']['StorageDescriptor']['OutputFormat']
     serde_info = response['Table']['StorageDescriptor']['SerdeInfo']
@@ -418,19 +420,20 @@ def add_partitions_by_location(db, table, location, kargs):
             },
         }
         try:
-            _glue.create_partition(DatabaseName=db, TableName=table, PartitionInput=partition_input)
+            glue.create_partition(DatabaseName=db, TableName=table, PartitionInput=partition_input)
             print('Partition [{}] added'.format(path))
-        except _glue.exceptions.AlreadyExistsException:
+        except glue.exceptions.AlreadyExistsException:
             print('Partition [{}] already exists'.format(path))
 
 
 def add_partition(db, table, kargs):
     "Create a new Glue partition"
+    glue = get_glue()
     location = kargs.get('location')
     if 'location' in kargs:
         del kargs['location']
     # Get glue table
-    response = _glue.get_table(DatabaseName=db, Name=table)
+    response = glue.get_table(DatabaseName=db, Name=table)
     # Check partition keys
     partition_keys = response['Table']['PartitionKeys']
     if len(kargs) != len(partition_keys):
@@ -466,14 +469,15 @@ def add_partition(db, table, kargs):
         },
     }
     try:
-        return _glue.create_partition(DatabaseName=db, TableName=table, PartitionInput=partition_input)
-    except _glue.exceptions.AlreadyExistsException:
+        return glue.create_partition(DatabaseName=db, TableName=table, PartitionInput=partition_input)
+    except glue.exceptions.AlreadyExistsException:
         raise PartitionAlreadyExists('Partition [{}] already exists'.format(', '.join(partition_values)))
 
 
 def delete_partition(db, table, kargs):
     "Deletes a Glue partition"
-    response = _glue.get_table(DatabaseName=db, Name=table)
+    glue = get_glue()
+    response = glue.get_table(DatabaseName=db, Name=table)
     partition_keys = response['Table']['PartitionKeys']
     if len(kargs) != len(partition_keys):
         raise InvalidOption(
@@ -483,8 +487,8 @@ def delete_partition(db, table, kargs):
         )
     partition_values = [kargs[x['Name']] for x in partition_keys]
     try:
-        return _glue.delete_partition(DatabaseName=db, TableName=table, PartitionValues=partition_values)
-    except _glue.exceptions.EntityNotFoundException:
+        return glue.delete_partition(DatabaseName=db, TableName=table, PartitionValues=partition_values)
+    except glue.exceptions.EntityNotFoundException:
         raise PartitionNotFound('Partition [{}] not found'.format(', '.join(partition_values)))
 
 
@@ -492,13 +496,14 @@ Table = namedtuple('Table', ['table_name', 'database_name'])
 
 
 def list_tables():
-    response = _glue.search_tables()
+    glue = get_glue()
+    response = glue.search_tables()
     tables = []
     while response:
         for table in response['TableList']:
             tables.append(Table(table_name=table['Name'], database_name=table['DatabaseName']))
         if response.get('NextToken'):
-            response = _glue.search_tables(NextToken=response.get('NextToken'))
+            response = glue.search_tables(NextToken=response.get('NextToken'))
         else:
             response = None
     return tables
