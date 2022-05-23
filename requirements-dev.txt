@@ -1,0 +1,7 @@
+coverage
+flake8
+mypy
+sphinx
+pytest
+black
+twine<3.4

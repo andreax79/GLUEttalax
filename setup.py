@@ -11,16 +11,16 @@ with codecs.open(os.path.join(d, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(
-    name = 'gluettalax',
-    version = __version__,
-    description = 'Glue ETL without constipation',
-    long_description = long_description,
+    name='gluettalax',
+    version=__version__,
+    description='Glue ETL without constipation',
+    long_description=long_description,
     long_description_content_type='text/markdown',
-    url = 'https://github.com/andreax79/GLUEttalax',
-    author = 'Andrea Bonomi',
-    author_email = 'andrea.bonomi@gmail.com',
-    license = 'MIT',
-    classifiers = [
+    url='https://github.com/andreax79/GLUEttalax',
+    author='Andrea Bonomi',
+    author_email='andrea.bonomi@gmail.com',
+    license='MIT',
+    classifiers=[
         'Intended Audience :: Developers',
         'Topic :: Utilities',
         'License :: Public Domain',
@@ -37,15 +37,14 @@ setup(
     ],
     zip_safe=True,
     include_package_data=True,
-    keywords = 'aws glue cli',
-    py_modules=[ 'gluettalax' ],
-    install_requires = [ 'boto3' ],
-    entry_points = {
+    keywords='aws glue cli',
+    py_modules=['gluettalax'],
+    install_requires=['boto3'],
+    entry_points={
         'console_scripts': [
             'gluettalax=gluettalax:main',
         ],
     },
-    test_suite='nose.collector',
-    tests_require=['nose'],
+    test_suite='test',
+    tests_require=['pytest'],
 )
-
