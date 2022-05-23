@@ -35,7 +35,7 @@ from inspect import currentframe, getframeinfo
 from urllib.parse import urlparse
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '1.0.7'
+__version__ = '1.1.0'
 __all__ = [
     'CrawlerTimeout',
     'GluettalaxException',
