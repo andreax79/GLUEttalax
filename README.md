@@ -1,6 +1,12 @@
 # GLUEttalax
 Glue ETL without constipation
 
+[![Build Status](https://github.com/andreax79/GLUEttalax/workflows/Tests/badge.svg)](https://github.com/andreax79/GLUEttalax/actions)
+[![PyPI version](https://badge.fury.io/py/gluettalax.svg)](https://badge.fury.io/py/GLUEttalax)
+[![PyPI](https://img.shields.io/pypi/pyversions/GLUEttalax.svg)](https://pypi.org/project/GLUEttalax)
+[![Downloads](https://pepy.tech/badge/GLUEttalax/month)](https://pepy.tech/project/GLUEttalax)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 ```
 usage: gluettalax <command> [parameters]
 
