@@ -60,6 +60,8 @@ __all__ = [
     'add_partition',
     'add_partitions_by_location',
     'delete_partition',
+    'main',
+    'gluettalax',
 ]
 
 
@@ -773,7 +775,7 @@ def cmd_del_partition(argv):
 @usage('[pattern] [--noheaders]')
 def cmd_list_tables(argv):
     """
-    List Glue crawlers.
+    List Glue tables.
     Example: list_tables 'test*' --noheaders
     """
     default_args = {'op_noheaders': False}
@@ -839,6 +841,11 @@ def main(argv=None):
     except GluettalaxException as ex:
         print(ex)
         return 1
+
+
+def gluettalax(*argv):
+    "Run a Gluettalax command and return the exit code"
+    return main(['gluettalax'] + list(argv))
 
 
 if __name__ == "__main__":
