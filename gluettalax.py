@@ -791,7 +791,7 @@ def cmd_list_tables(argv):
         print(fmt.format(database_name='Database', table_name='Name'))
         print('-' * 70)
     for table in list_tables():
-        if not pattern or fnmatch.fnmatch(table['Name'], pattern):
+        if not pattern or fnmatch.fnmatch(table.table_name, pattern):
             print(fmt.format(database_name=table.database_name, table_name=table.table_name))
 
 
