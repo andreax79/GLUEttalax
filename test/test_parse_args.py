@@ -24,8 +24,8 @@
 # SOFTWARE.
 #
 
+import pytest
 from gluettalax import parse_args, InvalidOption
-from unittest import TestCase, main
 
 help_text_1 = '<crawler_name> [--async] [--timeout=seconds]'
 default_args_1 = {'op_async': False, 'timeout': 123}
@@ -35,93 +35,101 @@ help_text_3 = '<job_name> [--async] [--param=value...]'
 default_args_3 = {'op_async': False}
 
 
-class TestParseArgs(TestCase):
-    def test_none(self):
-        args = None
-        name, kargs = parse_args(args, help_text_2)
+def test_none():
+    args = None
+    name, kargs = parse_args(args, help_text_2)
 
-    def test_empty_list(self):
-        args = []
-        name, kargs = parse_args(args, help_text_2)
 
-    def test_parse_ok_1_full(self):
-        args = ['run_crawler', 'NAME', '--async', '--timeout=456']
+def test_empty_list():
+    args = []
+    name, kargs = parse_args(args, help_text_2)
+
+
+def test_parse_ok_1_full():
+    args = ['run_crawler', 'NAME', '--async', '--timeout=456']
+    name, kargs = parse_args(args, help_text_1, default_args_1)
+    assert name == 'NAME'
+    assert kargs['timeout'] == '456'
+    assert kargs['op_async'] == True
+
+
+def test_parse_ok_1_space():
+    args = ['run_crawler', 'NAME', '--timeout', '456', '--async']
+    name, kargs = parse_args(args, help_text_1, default_args_1)
+    assert name == 'NAME'
+    assert kargs['timeout'] == '456'
+    assert kargs['op_async'] == True
+
+
+def test_parse_ok_1_part():
+    args = ['run_crawler', 'NAME', '--timeout=456']
+    name, kargs = parse_args(args, help_text_1, default_args_1)
+    assert name == 'NAME'
+    assert kargs['timeout'] == '456'
+    assert kargs['op_async'] == False
+
+
+def test_parse_defaults():
+    args = ['run_crawler', 'NAME']
+    name, kargs = parse_args(args, help_text_1, default_args_1)
+    assert name == 'NAME'
+    assert kargs['timeout'] == 123
+    assert kargs['op_async'] == False
+
+
+def test_parse_missing():
+    with pytest.raises(InvalidOption):
+        args = ['run_crawler']
         name, kargs = parse_args(args, help_text_1, default_args_1)
-        self.assertEqual(name, 'NAME')
-        self.assertEqual(kargs['timeout'], '456')
-        self.assertEqual(kargs['op_async'], True)
+        print(name, kargs)
 
-    def test_parse_ok_1_space(self):
-        args = ['run_crawler', 'NAME', '--timeout', '456', '--async']
+
+def test_parse_invalid():
+    with pytest.raises(InvalidOption):
+        args = ['run_crawler', 'A', 'B']
         name, kargs = parse_args(args, help_text_1, default_args_1)
-        self.assertEqual(name, 'NAME')
-        self.assertEqual(kargs['timeout'], '456')
-        self.assertEqual(kargs['op_async'], True)
-
-    def test_parse_ok_1_part(self):
-        args = ['run_crawler', 'NAME', '--timeout=456']
-        name, kargs = parse_args(args, help_text_1, default_args_1)
-        self.assertEqual(name, 'NAME')
-        self.assertEqual(kargs['timeout'], '456')
-        self.assertEqual(kargs['op_async'], False)
-
-    def test_parse_defaults(self):
-        args = ['run_crawler', 'NAME']
-        name, kargs = parse_args(args, help_text_1, default_args_1)
-        self.assertEqual(name, 'NAME')
-        self.assertEqual(kargs['timeout'], 123)
-        self.assertEqual(kargs['op_async'], False)
-
-    def test_parse_missing(self):
-        with self.assertRaises(InvalidOption):
-            args = ['run_crawler']
-            name, kargs = parse_args(args, help_text_1, default_args_1)
-            print(name, kargs)
-
-    def test_parse_invalid(self):
-        with self.assertRaises(InvalidOption):
-            args = ['run_crawler', 'A', 'B']
-            name, kargs = parse_args(args, help_text_1, default_args_1)
-            print(name, kargs)
-
-    def test_parse_ok_2(self):
-        args = ['list_runs', 'NAME', '--lines=1']
-        name, kargs = parse_args(args, help_text_2, default_args_2)
-        self.assertEqual(name, 'NAME')
-        self.assertEqual(kargs['lines'], '1')
-
-    def test_parse_ok_2_defaults(self):
-        args = ['list_runs']
-        name, kargs = parse_args(args, help_text_2, default_args_2)
-        self.assertEqual(name, None)
-        self.assertEqual(kargs['lines'], None)
-
-    def test_parse_ok_2_no_name(self):
-        args = ['list_runs', '--lines=123', '--noheaders']
-        name, kargs = parse_args(args, help_text_2, default_args_2)
-        self.assertEqual(name, None)
-        self.assertEqual(kargs['lines'], '123')
-        self.assertEqual(kargs['op_noheaders'], True)
-
-    def test_parse_ok_2_no_name_reverse(self):
-        args = ['list_runs', '--noheaders', '--lines=123']
-        name, kargs = parse_args(args, help_text_2, default_args_2)
-        self.assertEqual(name, None)
-        self.assertEqual(kargs['lines'], '123')
-        self.assertEqual(kargs['op_noheaders'], True)
-
-    def test_parse_ok_3(self):
-        args = ['run_job', 'NAME', '--a=1', '--b=2']
-        name, kargs = parse_args(args, help_text_3, default_args_3)
-        self.assertEqual(name, 'NAME')
-        self.assertEqual(kargs['a'], '1')
-        self.assertEqual(kargs['b'], '2')
-
-    def test_parse_ok_3_defaults(self):
-        args = ['run_job', 'NAME']
-        name, kargs = parse_args(args, help_text_3, default_args_3)
-        self.assertEqual(name, 'NAME')
+        print(name, kargs)
 
 
-if __name__ == '__main__':
-    main()
+def test_parse_ok_2():
+    args = ['list_runs', 'NAME', '--lines=1']
+    name, kargs = parse_args(args, help_text_2, default_args_2)
+    assert name == 'NAME'
+    assert kargs['lines'] == '1'
+
+
+def test_parse_ok_2_defaults():
+    args = ['list_runs']
+    name, kargs = parse_args(args, help_text_2, default_args_2)
+    assert name == None
+    assert kargs['lines'] == None
+
+
+def test_parse_ok_2_no_name():
+    args = ['list_runs', '--lines=123', '--noheaders']
+    name, kargs = parse_args(args, help_text_2, default_args_2)
+    assert name == None
+    assert kargs['lines'] == '123'
+    assert kargs['op_noheaders'] == True
+
+
+def test_parse_ok_2_no_name_reverse():
+    args = ['list_runs', '--noheaders', '--lines=123']
+    name, kargs = parse_args(args, help_text_2, default_args_2)
+    assert name == None
+    assert kargs['lines'] == '123'
+    assert kargs['op_noheaders'] == True
+
+
+def test_parse_ok_3():
+    args = ['run_job', 'NAME', '--a=1', '--b=2']
+    name, kargs = parse_args(args, help_text_3, default_args_3)
+    assert name == 'NAME'
+    assert kargs['a'] == '1'
+    assert kargs['b'] == '2'
+
+
+def test_parse_ok_3_defaults():
+    args = ['run_job', 'NAME']
+    name, kargs = parse_args(args, help_text_3, default_args_3)
+    assert name == 'NAME'
