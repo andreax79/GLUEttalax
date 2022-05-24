@@ -4,4 +4,5 @@ mypy
 sphinx
 pytest
 black
+moto
 twine<3.4
