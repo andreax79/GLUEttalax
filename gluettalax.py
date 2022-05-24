@@ -36,7 +36,7 @@ from inspect import currentframe, getframeinfo
 from urllib.parse import urlparse
 
 __author__ = 'Andrea Bonomi <andrea.bonomi@gmail.com>'
-__version__ = '1.1.1'
+__version__ = '1.1.2'
 __all__ = [
     'CrawlerTimeout',
     'GluettalaxException',
@@ -836,7 +836,9 @@ def lookup_cmd(cmd):
     raise GluettalaxCommandNotFound('Invalid command "{}"; use "help" for a list.'.format(cmd))
 
 
-def main(argv):
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv
     if len(argv) < 2:
         cmd_help(argv[1:])
         return 2
